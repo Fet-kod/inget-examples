@@ -14,7 +14,7 @@ const __dirname = path.dirname(__filename);
 const ingetHelpersRoot = path.resolve(__dirname, "..", "..", ".inget-data");
 const configRoot = path.resolve(__dirname, "..", "..", "config");
 
-export async function downloadInget() {
+export async function downloadInget({ replace = false } = {}) {
   const downloadOS = {
     linux: "linux",
     win32: "windows",
@@ -60,7 +60,7 @@ export async function downloadInget() {
   }
 
   const executablePath = path.resolve(ingetHelpersRoot, binaryName);
-  if (await pathExists(executablePath)) {
+  if (!replace && (await pathExists(executablePath))) {
     return executablePath;
   }
 
