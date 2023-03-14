@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "scripts": {
+    "start": "node server.mjs 6060",
+    "dev": "nodemon --signal SIGTERM server.mjs 6060"
+  },
+  "dependencies": {
+    "bankid-node": "*",
+    "inget-helpers": "*"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.21"
+  }
+}

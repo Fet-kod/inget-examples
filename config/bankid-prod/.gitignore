@@ -1,0 +1,5 @@
+*
+!/.gitignore
+!/config.json
+!/server.pem
+!/README.md

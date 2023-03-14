@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>BankID playground</title>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, shrink-to-fit=no"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="//unpkg.com/alpinejs" defer></script>
+    <script>
+      document.addEventListener("alpine:init", () => {
+        const stateFromHash = (() => {
+          try {
+            return JSON.parse(
+              atob(decodeURIComponent(window.location.hash.slice(1)))
+            );
+          } catch (e) {
+            return {};
+          }
+        })();
+
+        Alpine.data("state", () => ({
+          init() {
+            this.fetchProfiles();
+            this.validateConfig();
+
+            this.collect();
+            history.replaceState(
+              undefined,
+              undefined,
+              "#" + btoa(JSON.stringify(this.bankid))
+            );
+
+            this.$watch(
+              "bankid.config",
+              (config) => {
+                this.validateConfig(config);
+                if (config.profile) {
+                  const { real, personalNumber } = this.profiles.find(
+                    (p) => p.profile === config.profile
+                  );
+                  if (real) {
+                    this.bankid.client.personalNumber = personalNumber;
+                  }
+                }
+              },
+              {
+                deep: true,
+              }
+            );
+
+            this.$watch("bankid", (bankid) => {
+              history.replaceState(
+                undefined,
+                undefined,
+                "#" + btoa(JSON.stringify(bankid))
+              );
+
+              if (this.started) {
+                this.started = false;
+
+                const {
+                  otherDevice,
+                  autoStartToken,
+                  personalNumber,
+                  startUrl,
+                  appUrl,
+                  profile,
+                } = bankid.active;
+                const { real } = this.profiles.find(
+                  (p) => p.profile === profile
+                );
+
+                console.debug("inget started", {
+                  real,
+                  otherDevice,
+                  autoStartToken,
+                  personalNumber,
+                  startUrl,
+                  appUrl,
+                });
+                if (otherDevice) {
+                  this.collect();
+                  if (!real) {
+                    window.inget.start({
+                      url: appUrl,
+                      autostarttoken: autoStartToken,
+                      personalnumber: personalNumber || "",
+                      oncomplete: () => {
+                        console.debug("completed!");
+                      },
+                    });
+                  }
+                } else {
+                  const url = new URL(startUrl);
+                  url.searchParams.set("redirect", window.location.href);
+                  window.location.replace(url);
+                }
+              }
+            });
+          },
+
+          validateConfig(config) {
+            const { type, text } = config || this.bankid.config;
+            if (type === "sign" && text.length === 0) {
+              this.errors.config.text =
+                "User visible message is required when signing.";
+            } else {
+              this.errors.config.text = false;
+            }
+          },
+
+          profiles: [],
+          async fetchProfiles() {
+            const response = await fetch("/profiles");
+            if (!response.ok) {
+              throw new Errror("Failed to fetch profiles");
+            }
+            const { profiles } = await response.json();
+            this.profiles = profiles;
+          },
+
+          bankid: {
+            config: {
+              type: "auth",
+              text: "",
+            },
+
+            client: {
+              personalNumber: "",
+            },
+
+            active: null,
+            last: null,
+
+            ...stateFromHash,
+          },
+
+          started: false,
+          starting: false,
+          collecting: false,
+
+          errors: {
+            config: {
+              text: false,
+            },
+            client: {
+              personalNumber: false,
+            },
+            start: false,
+          },
+
+          async start({ otherDevice = false } = {}) {
+            this.starting = true;
+            this.errors.start = false;
+            this.bankid.active = null;
+
+            const { personalNumber } = this.bankid.client;
+            const { type, text, profile } = this.bankid.config;
+            const endUserIp = "127.0.0.1";
+
+            const response = await fetch("/" + type, {
+              method: "POST",
+              body: JSON.stringify({
+                personalNumber,
+                text,
+                profile,
+                endUserIp,
+              }),
+            });
+
+            if (response.ok) {
+              const { orderRef, autoStartToken, startUrl, appUrl } =
+                await response.json();
+              this.bankid.active = {
+                orderRef,
+                autoStartToken,
+                personalNumber,
+                startUrl,
+                appUrl,
+                otherDevice,
+                profile,
+              };
+              this.started = true;
+            } else {
+              this.errors.start = await response.json();
+            }
+            this.starting = false;
+          },
+
+          async collect(compareWith) {
+            clearInterval(this.collecting);
+            if (!this.bankid.active) return;
+
+            const { orderRef, profile } = this.bankid.active;
+            if (compareWith && compareWith.orderRef !== orderRef) return;
+
+            const res = await fetch("/collect", {
+              method: "POST",
+              body: JSON.stringify({
+                orderRef,
+                profile,
+              }),
+            });
+            if (!res.ok) {
+              throw new Error("Failed to collect");
+            }
+
+            const result = await res.json();
+            if (result.status === "pending") {
+              this.collecting = setTimeout(
+                () => this.collect({ orderRef }),
+                2000
+              );
+            } else {
+              this.bankid.active = null;
+              this.collecting = false;
+              if (result.completionData) {
+                // very long values in real envs
+                if (result.completionData.signature) {
+                  result.completionData.signature = "...";
+                }
+                if (result.completionData.ocspResponse) {
+                  result.completionData.ocspResponse = "...";
+                }
+              }
+              this.bankid.last = result;
+              console.debug("completed!", result);
+            }
+          },
+
+          async reset() {
+            this.bankid.active = null;
+            this.bankid.last = null;
+            this.started = false;
+            this.starting = false;
+            this.collecting = false;
+            this.errors = {
+              config: {
+                text: false,
+              },
+              client: {
+                personalNumber: false,
+              },
+              start: false,
+            };
+          },
+        }));
+      });
+    </script>
+    <script defer src="https://bankid.inget.dev/dist/inget-client.js"></script>
+  </head>
+  <body>
+    <inget-client backdrop="black"></inget-client>
+
+    <div id="app" x-data="state">
+      <div class="flex flex-col items-center justify-center min-h-screen">
+        <div class="grid grid-cols-1 md:grid-cols-2 max-w-2xl min-w-fit">
+          <div class="bg-yellow-200 p-8">
+            <h2 class="text-2xl font-bold">1. Profile</h2>
+            <form class="mt-4 gap-2 flex flex-col">
+              <template
+                x-for="{ profile, valid, errors } in profiles"
+                :key="profile"
+              >
+                <div>
+                  <label class="inline-flex items-center">
+                    <input
+                      x-model="bankid.config.profile"
+                      type="radio"
+                      class="form-radio"
+                      name="type"
+                      :value="profile"
+                      :disabled="!valid"
+                    />
+                    <span
+                      class="ml-2"
+                      :style="valid ? 'opacity: 1' : 'opacity: 0.5'"
+                      x-text="profile"
+                    ></span>
+                  </label>
+                  <div>
+                    <span class="text-xs" x-text="errors.join(', ')"></span>
+                  </div>
+                </div>
+              </template>
+            </form>
+          </div>
+
+          <div class="bg-blue-200 p-8">
+            <h2 class="text-2xl font-bold">2. Configure BankID flow</h2>
+            <form class="mt-4">
+              <div class="mt-4">
+                <label class="inline-flex items-center">
+                  <input
+                    x-model="bankid.config.type"
+                    type="radio"
+                    class="form-radio"
+                    name="type"
+                    value="auth"
+                  />
+                  <span class="ml-2">Authenticate</span>
+                </label>
+                <label class="inline-flex items-center ml-6">
+                  <input
+                    x-model="bankid.config.type"
+                    type="radio"
+                    class="form-radio"
+                    name="type"
+                    value="sign"
+                  />
+                  <span class="ml-2">Sign</span>
+                </label>
+              </div>
+              <div class="mt-4">
+                <label
+                  class="block text-gray-700 text-sm font-bold mb-2"
+                  for="text"
+                >
+                  Markdown
+                </label>
+                <textarea
+                  class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                  id="text"
+                  rows="8"
+                  placeholder="# Some markdown&#10;&#10;List:&#10;+ Item one&#10;+ Item two&#10;"
+                  x-model="bankid.config.text"
+                ></textarea>
+              </div>
+              <div
+                :style="errors.config.text? 'opacity: 1' : 'opacity: 0'"
+                class="mt-4"
+              >
+                <div
+                  class="text-sm text-red-500 font-bold"
+                  x-text="errors.config.text"
+                ></div>
+              </div>
+            </form>
+          </div>
+
+          <div class="bg-emerald-200 p-8">
+            <h2 class="text-2xl font-bold">3. Client</h2>
+            <form class="mt-4 gap-2 flex flex-col">
+              <!-- text input for personalNumber -->
+              <div class="mt-4">
+                <label
+                  class="block text-gray-700 text-sm font-bold mb-2"
+                  for="personalNumber"
+                >
+                  Personal number
+                </label>
+                <input
+                  autocomplete="off"
+                  data-form-type="other"
+                  class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                  id="personalNumber"
+                  type="text"
+                  x-model="bankid.client.personalNumber"
+                />
+              </div>
+              <div
+                :style="errors.personalNumber? 'opacity: 1' : 'opacity: 0'"
+                class="mt-4"
+              >
+                <div
+                  class="text-sm text-red-500 font-bold"
+                  x-text="errors.personalNumber"
+                ></div>
+              </div>
+
+              <div class="mt-4 grid grid-cols-2 gap-4">
+                <div>
+                  <button
+                    class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+                    :style="(!starting && !bankid.active)? 'opacity: 1' : 'opacity: 0.5'"
+                    :disabled="starting || bankid.active"
+                    @click="start()"
+                  >
+                    Start on this device
+                  </button>
+                </div>
+                <div>
+                  <button
+                    class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+                    :style="(!starting && !bankid.active)? 'opacity: 1' : 'opacity: 0.5'"
+                    :disabled="starting || bankid.active"
+                    @click="start({ otherDevice: true })"
+                  >
+                    Start on other device
+                  </button>
+                </div>
+              </div>
+
+              <div
+                :style="errors.start ? 'opacity: 1' : 'opacity: 0'"
+                class="mt-4"
+              >
+                <div
+                  class="text-sm text-red-500 font-bold"
+                  x-text="errors.start.details"
+                ></div>
+              </div>
+            </form>
+          </div>
+
+          <div class="bg-pink-200 p-8">
+            <h2 class="text-2xl font-bold">4. Collect</h2>
+            <div class="mt-4 gap-2 flex flex-col">
+              <div :class="bankid.active ? 'animate-pulse text-red-600' : 'text-gray-700'">
+                <h3 class="font-bold">Active</h3>
+                <div class="flex gap-2">
+                  <div>
+                    <label
+                      class="block text-sm font-bold mb-2"
+                      for="activeOrderRef"
+                    >
+                      orderRef
+                    </label>
+                    <input
+                      class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline"
+                      id="activeOrderRef"
+                      type="text"
+                      placeholder="nothing in progress"
+                      :value="bankid.active?.orderRef"
+                      disabled
+                    />
+                  </div>
+                  <div>
+                    <label
+                      class="block text-sm font-bold mb-2"
+                      for="activeProfile"
+                    >
+                      profile
+                    </label>
+                    <input
+                      class="shadow appearance-none border rounded w-full py-2 px-3 leading-tight focus:outline-none focus:shadow-outline"
+                      id="activeProfile"
+                      type="text"
+                      :value="bankid.active?.profile"
+                      disabled
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <h3 class="font-bold">Last result</h3>
+              <div>
+                <textarea
+                  class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline text-sm"
+                  rows="10"
+                  :value="JSON.stringify(bankid.last, null, 2)"
+                  disabled
+                ></textarea>
+              </div>
+
+              <div class="mt-4 grid grid-cols-2 gap-4">
+                <div>
+                  <button
+                    class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
+                    @click="reset()"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

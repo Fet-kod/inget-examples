@@ -1,0 +1,5 @@
+{
+  "apiUrl": "https://appapi2.bankid.com",
+  "appUrl": "https://app.bankid.com",
+  "customUrl": "bankid:///"
+}

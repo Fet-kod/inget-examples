@@ -1,0 +1,12 @@
+{
+  "name": "inget-examples",
+  "type": "module",
+  "scripts": {
+    "download-inget": "cd inget-helpers && npm run download-inget"
+  },
+  "workspaces": [
+    "bankid-node",
+    "frontend-alpinejs",
+    "inget-helpers"
+  ]
+}

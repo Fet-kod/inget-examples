@@ -1,0 +1,79 @@
+name: bankid-node
+on: [push]
+
+jobs:
+  devcontainer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build and run dev container task
+        uses: devcontainers/ci@v0.3
+        with:
+          runCmd: |
+            cd bankid-node
+            npm run test
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: "Install workspace dependencies"
+        run: npm install
+      - name: "Download local Inget"
+        run: npm run download-inget
+
+      - name: "Install dependencies"
+        run: npm install
+        working-directory: bankid-node
+      - name: "Run tests"
+        run: npm run test
+        working-directory: bankid-node
+
+  windows:
+    needs: [linux]
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: "Install workspace dependencies"
+        run: npm install
+      - name: "Download local Inget"
+        run: npm run download-inget
+
+      - name: "Install dependencies"
+        run: npm install
+        working-directory: bankid-node
+      - name: "Run tests"
+        run: npm run test
+        working-directory: bankid-node
+
+  macos:
+    needs: [linux]
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: "Install workspace dependencies"
+        run: npm install
+      - name: "Download local Inget"
+        run: npm run download-inget
+
+      - name: "Install dependencies"
+        run: npm install
+        working-directory: bankid-node
+      - name: "Run tests"
+        run: npm run test
+        working-directory: bankid-node
