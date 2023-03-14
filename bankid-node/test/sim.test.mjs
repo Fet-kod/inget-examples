@@ -21,6 +21,8 @@ describe("Simulated environments", function () {
       let inget;
 
       before(async function () {
+        this.timeout(90000);
+
         this.profile = profile;
         this.responseLogger = await fileLogger(path.join(this.profile, "http"));
 
@@ -37,6 +39,8 @@ describe("Simulated environments", function () {
       itSupportsBankID();
 
       after(async function () {
+        this.timeout(10000);
+
         if (inget) {
           inget.controller.abort();
         }
