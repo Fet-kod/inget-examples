@@ -7,7 +7,6 @@ import assert from "node:assert";
 import child_process from "node:child_process";
 import axios from "axios";
 import { fileURLToPath } from "node:url";
-import yauzl from "yauzl";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -182,55 +181,24 @@ export async function bootstrap(profile) {
 
   const resp = await axios({
     method: "GET",
-    url: `${bootstrap.url}/_/config.zip`,
-    responseType: "stream",
+    url: `${bootstrap.url}/_/manifest.json`,
   });
   assert.equal(resp.status, 200, "bootstrap failed");
-  const configZipPath = path.resolve(configDirectory, "config.zip");
-  resp.data.pipe(fs.createWriteStream(configZipPath));
-  await new Promise((resolve, reject) => {
-    resp.data.on("end", resolve);
-    resp.data.on("error", reject);
-  });
+  const manifest = resp.data;
 
-  // unzip config.zip using yauzl and promises
-  await new Promise((resolve, reject) => {
-    yauzl.open(configZipPath, { lazyEntries: true }, function (err, zipfile) {
-      if (err) {
-        reject(err);
-      } else {
-        zipfile.once("end", function () {
-          zipfile.close();
-          resolve();
-        });
-        zipfile.readEntry();
-        zipfile.on("entry", function (entry) {
-          if (/\/$/.test(entry.fileName)) {
-            // Directory file names end with '/'.
-            // Note that entries for directories themselves are optional.
-            // An entry's fileName implicitly requires its parent directories to exist.
-            zipfile.readEntry();
-          } else {
-            // file entry
-            zipfile.openReadStream(entry, function (err, readStream) {
-              if (err) {
-                reject(err);
-              } else {
-                readStream.on("end", function () {
-                  zipfile.readEntry();
-                });
-                readStream.pipe(
-                  fs.createWriteStream(
-                    path.resolve(configDirectory, entry.fileName)
-                  )
-                );
-              }
-            });
-          }
-        });
-      }
+  for (let { url, path: localPath } of manifest.config) {
+    const resp = await axios({
+      method: "GET",
+      url,
+      responseType: "stream",
     });
-  });
+    assert.equal(resp.status, 200, `download failed: ${url}`);
+    resp.data.pipe(fs.createWriteStream(path.join(configDirectory, localPath)));
+    await new Promise((resolve, reject) => {
+      resp.data.on("end", resolve);
+      resp.data.on("error", reject);
+    });
+  }
 
   didBootstrap = true;
   return {
@@ -333,3 +301,4 @@ async function pathExists(p) {
   }
   return true;
 }
+
